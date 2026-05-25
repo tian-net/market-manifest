@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
       - name: backend
-        image: docker.io/tu-usuario/backend:latest
+        image: docker.io/tu-usuario/market-backend:latest
         ports:
         - containerPort: 8000
         env:
