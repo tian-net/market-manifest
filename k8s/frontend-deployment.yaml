@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
       - name: frontend
-        image: docker.io/tu-usuario/market-frontend:latest
+        image: docker.io/tian11qb/market-frontend:latest
         ports:
         - containerPort: 80
         resources:

@@ -26,20 +26,20 @@ git clone https://github.com/tian-net/AS242S4_PII_T05-fe.git
 
 ```bash
 docker build -f backend/Dockerfile \
-  -t docker.io/tu-usuario/market-backend:latest \
+  -t docker.io/tian11qb/market-backend:latest \
   ./ruta/a/AS242S4_PII_T05-be
 
-docker push docker.io/tu-usuario/market-backend:latest
+docker push docker.io/tian11qb/market-backend:latest
 ```
 
 ### Frontend (React + Vite + Nginx)
 
 ```bash
 docker build -f frontend/Dockerfile \
-  -t docker.io/tu-usuario/market-frontend:latest \
+  -t docker.io/tian11qb/market-frontend:latest \
   ./ruta/a/AS242S4_PII_T05-fe
 
-docker push docker.io/tu-usuario/market-frontend:latest
+docker push docker.io/tian11qb/market-frontend:latest
 ```
 
 ### MongoDB (imagen personalizada o usar la oficial)
@@ -50,13 +50,13 @@ docker pull mongo:7
 
 # Opcion 2: Construir imagen personalizada
 docker build -f mongo/Dockerfile \
-  -t docker.io/tu-usuario/market-mongodb:latest \
+  -t docker.io/tian11qb/market-mongodb:latest \
   ./ruta/a/tu-config-mongo
 
-docker push docker.io/tu-usuario/market-mongodb:latest
+docker push docker.io/tian11qb/market-mongodb:latest
 ```
 
-> **Nota:** Reemplaza `tu-usuario` por tu nombre de usuario de Docker Hub.  
+> **Nota:** Reemplaza `tian11qb` por tu nombre de usuario de Docker Hub.  
 > Si usas otro registro (ECR, GHCR), actualiza las referencias en los archivos `k8s/*-deployment.yaml`.
 
 ---

@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
       - name: mongodb
-        image: docker.io/tu-usuario/market-mongodb:latest
+        image: docker.io/tian11qb/market-mongodb:latest
         ports:
         - containerPort: 27017
         env:
