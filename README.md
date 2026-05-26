@@ -1,177 +1,202 @@
-# Market Manifest — Despliegue en Kubernetes (AWS EC2)
+# Market Manifest — Despliegue en EC2 (Ubuntu 24.04)
 
-Repositorio de manifiestos Kubernetes y documentacion para el despliegue del **Marketplace Turistico** en un cluster K8s sobre AWS EC2.
+Repositorio con scripts y configuracion para desplegar el **Marketplace Turistico** en **3 instancias EC2 t3.medium** con Ubuntu 24.04, una para cada componente:
 
----
-
-## Prerrequisitos
-
-- **Docker Desktop** instalado localmente
-- **kubectl** configurado contra el cluster K8s
-- **Cluster Kubernetes** en AWS EC2 (kubeadm, k3s, o EKS)
-- Cuenta en **Docker Hub** (o el registro de contenedores que uses)
+| Instancia | Componente | Stack |
+|-----------|-----------|-------|
+| EC2 #1 | Base de Datos | MongoDB 7 |
+| EC2 #2 | Backend | Flask + Gunicorn + Python 3.11 |
+| EC2 #3 | Frontend | React + Vite + Nginx |
 
 ---
 
-## 1. Construir y subir imagenes Docker
-
-Primero, clona los repositorios de aplicacion:
-
-```bash
-git clone https://github.com/tian-net/AS242S4_PII_T05-be.git
-git clone https://github.com/tian-net/AS242S4_PII_T05-fe.git
-```
-
-### Backend (Flask + Gunicorn)
-
-```bash
-docker build -f backend/Dockerfile \
-  -t docker.io/tian11qb/market-backend:latest \
-  ./ruta/a/AS242S4_PII_T05-be
-
-docker push docker.io/tian11qb/market-backend:latest
-```
-
-### Frontend (React + Vite + Nginx)
-
-```bash
-docker build -f frontend/Dockerfile \
-  -t docker.io/tian11qb/market-frontend:latest \
-  ./ruta/a/AS242S4_PII_T05-fe
-
-docker push docker.io/tian11qb/market-frontend:latest
-```
-
-### MongoDB (imagen personalizada o usar la oficial)
-
-```bash
-# Opcion 1: Usar la imagen oficial directamente (no requiere build)
-docker pull mongo:7
-
-# Opcion 2: Construir imagen personalizada
-docker build -f mongo/Dockerfile \
-  -t docker.io/tian11qb/market-mongodb:latest \
-  ./ruta/a/tu-config-mongo
-
-docker push docker.io/tian11qb/market-mongodb:latest
-```
-
-> **Nota:** Reemplaza `tian11qb` por tu nombre de usuario de Docker Hub.  
-> Si usas otro registro (ECR, GHCR), actualiza las referencias en los archivos `k8s/*-deployment.yaml`.
-
----
-
-## 2. Configurar el Backend para entorno K8s
-
-Antes de construir la imagen, asegurate de que el backend lea la variable de entorno `MONGO_URI`:
-
-```python
-# app/config.py
-import os
-
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/tourism_marketplace")
-DB_NAME = "tourism_marketplace"
-```
-
-Agrega `gunicorn` a `requirements.txt`:
+## Arquitectura
 
 ```
-gunicorn
-```
-
----
-
-## 3. Desplegar en Kubernetes
-
-```bash
-# Crear namespace y todos los recursos
-kubectl apply -f k8s/namespace.yaml
-kubectl apply -f k8s/
-
-# Verificar el estado
-kubectl get all -n marketplace
-```
-
-El orden de creacion no importa, pero por claridad los recursos se aplican en este orden:
-
-1. `k8s/namespace.yaml` — Namespace `marketplace`
-2. `k8s/mongodb-pvc.yaml` — Volumen persistente 5Gi
-3. `k8s/mongodb-deployment.yaml` — MongoDB 1 replica
-4. `k8s/mongodb-service.yaml` — Servicio interno MongoDB
-5. `k8s/backend-deployment.yaml` — Backend Flask 2 replicas
-6. `k8s/backend-service.yaml` — Servicio interno Backend
-7. `k8s/frontend-deployment.yaml` — Frontend React 2 replicas
-8. `k8s/frontend-service.yaml` — LoadBalancer publico
-
----
-
-## 4. Acceder a la aplicacion
-
-```bash
-kubectl get svc frontend-service -n marketplace
-```
-
-Toma el `EXTERNAL-IP` del LoadBalancer y abrelo en el navegador.
-
-Si estas usando un entorno on-premise o kubeadm sin LoadBalancer, cambia el Service a `type: NodePort`:
-
-```bash
-kubectl patch svc frontend-service -n marketplace -p '{"spec":{"type":"NodePort"}}'
-```
-
-Luego accede via `http://<EC2-PUBLIC-IP>:<NODE-PORT>`.
-
----
-
-## 5. Comandos utiles
-
-```bash
-# Ver todos los recursos
-kubectl get all -n marketplace
-
-# Logs de un pod
-kubectl logs -n marketplace -l app=backend
-kubectl logs -n marketplace -l app=frontend
-kubectl logs -n marketplace -l app=mongodb
-
-# Escalar servicios
-kubectl scale deployment backend -n marketplace --replicas=3
-kubectl scale deployment frontend -n marketplace --replicas=3
-
-# Eliminar todo
-kubectl delete namespace marketplace
-
-# Eliminar solo el despliegue (conserva datos MongoDB)
-kubectl delete -f k8s/backend-deployment.yaml
-kubectl delete -f k8s/frontend-deployment.yaml
-```
-
----
-
-## 6. Resolver problemas comunes
-
-| Problema | Causa posible | Solucion |
-|----------|---------------|----------|
-| Backend no conecta a MongoDB | `MONGO_URI` incorrecta | Verificar env en `backend-deployment.yaml` |
-| Frontend muestra 502 | Nginx no resuelve `backend-service` | Verificar que el backend este corriendo |
-| MongoDB no arranca | PVC sin storage class | Configurar StorageClass o usar hostPath |
-| LoadBalancer sin External-IP | Cluster on-premise sin metalLB | Cambiar a `type: NodePort` |
-
----
-
-## 7. Arquitectura
-
-```
-Usuario → LoadBalancer (frontend-service:80)
+Usuario → http://<FRONTEND_PUBLIC_IP>:80
               ↓
-         [Nginx Pod]
-              ↓  /api/ → backend-service:8000
-         [Flask Gunicorn Pod]
-              ↓  mongodb://mongodb-service:27017
-         [MongoDB Pod]
-              ↓
-         [PVC 5Gi]
+         [Nginx]
+         Servir SPA (React build)
+              ↓  /api/ → http://<BACKEND_PRIVATE_IP>:8000
+         [Gunicorn]
+         Flask API
+              ↓  mongodb://<MONGO_PRIVATE_IP>:27017
+         [MongoDB 7]
 ```
 
-Cada componente esta aislado en su propio Pod dentro del namespace `marketplace`.  
-Las comunicaciones internas usan los nombres de servicio de Kubernetes.
+Las instancias se comunican por **IPs privadas** de AWS (misma VPC / security groups).
+
+---
+
+## Security Groups (AWS)
+
+| Grupo | Reglas |
+|-------|--------|
+| **MongoDB SG** | Puerto `27017` desde IP privada del Backend |
+| **Backend SG** | Puerto `8000` desde IP privada del Frontend |
+| **Frontend SG** | Puerto `80` desde `0.0.0.0/0` (HTTP publico) |
+| **SSH** | Puerto `22` desde tu IP (en los 3) |
+
+---
+
+## 1. Instancia MongoDB
+
+```bash
+# 1. Clonar este repo
+git clone https://github.com/tian-net/market-manifest.git
+cd market-manifest
+
+# 2. Ejecutar setup
+chmod +x mongo/setup.sh
+sudo ./mongo/setup.sh
+
+# 3. Verificar
+sudo systemctl status mongod
+```
+
+Anotar la **IP privada** de esta instancia — la necesitaras para el backend.
+
+---
+
+## 2. Instancia Backend
+
+```bash
+# 1. Clonar este repo
+git clone https://github.com/tian-net/market-manifest.git
+cd market-manifest
+
+# 2. Ejecutar setup pasando la IP privada de MongoDB
+chmod +x backend/setup.sh
+sudo ./backend/setup.sh <MONGO_PRIVATE_IP>
+
+# Ejemplo: sudo ./backend/setup.sh 10.0.1.50
+
+# 3. Verificar
+sudo systemctl status backend
+curl http://localhost:8000/
+```
+
+Anotar la **IP privada** de esta instancia — la necesitaras para el frontend.
+
+---
+
+## 3. Instancia Frontend
+
+```bash
+# 1. Clonar este repo
+git clone https://github.com/tian-net/market-manifest.git
+cd market-manifest
+
+# 2. Ejecutar setup pasando la IP privada del Backend
+chmod +x frontend/setup.sh
+sudo ./frontend/setup.sh <BACKEND_PRIVATE_IP>
+
+# Ejemplo: sudo ./frontend/setup.sh 10.0.1.100
+
+# 3. Verificar
+curl http://localhost/
+```
+
+Abrir en el navegador: `http://<FRONTEND_PUBLIC_IP>`
+
+---
+
+## Setup manual (si prefieres no usar los scripts)
+
+### MongoDB
+
+```bash
+curl -fsSL https://www.mongodb.org/static/pgp/server-7.0.asc | \
+  sudo gpg -o /usr/share/keyrings/mongodb-server-7.0.gpg --dearmor
+echo "deb [ signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | \
+  sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+sudo apt-get update -y
+sudo apt-get install -y mongodb-org
+sudo sed -i 's/127.0.0.1/0.0.0.0/' /etc/mongod.conf
+sudo systemctl enable mongod && sudo systemctl start mongod
+```
+
+### Backend
+
+```bash
+sudo apt-get install -y python3 python3-pip python3-venv git
+git clone https://github.com/vallegrande/AS242S4_PII_T05-be.git /home/ubuntu/backend
+cd /home/ubuntu/backend
+python3 -m venv venv
+source venv/bin/activate
+pip install gunicorn flask flask-cors pymongo email-validator python-dotenv
+echo "MONGO_URI=mongodb://<MONGO_IP>:27017/tourism_marketplace" > .env
+gunicorn --bind 0.0.0.0:8000 --workers 4 run:app
+```
+
+### Frontend
+
+```bash
+sudo apt-get install -y nginx git curl
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+git clone https://github.com/vallegrande/AS242S4_PII_T05-fe.git /home/ubuntu/frontend
+cd /home/ubuntu/frontend
+echo "VITE_API_BASE_URL=/api/v1" > .env
+npm install && npm run build
+sudo cp -r dist/* /var/www/html/
+sudo cp nginx.conf /etc/nginx/sites-available/default
+sudo sed -i 's/<BACKEND_IP>/<TU_BACKEND_IP>/' /etc/nginx/sites-available/default
+sudo systemctl restart nginx
+```
+
+---
+
+## Comandos utiles para las 3 instancias
+
+```bash
+# Ver logs del backend
+sudo journalctl -u backend -f
+
+# Ver logs de Nginx
+sudo tail -f /var/log/nginx/access.log
+sudo tail -f /var/log/nginx/error.log
+
+# Ver logs de MongoDB
+sudo journalctl -u mongod -f
+
+# Probar backend localmente
+curl http://localhost:8000/
+
+# Probar frontend localmente
+curl http://localhost/
+
+# Test de conexion backend -> mongo
+curl http://localhost:8000/api/v1/partners/
+
+# Reiniciar servicios
+sudo systemctl restart backend
+sudo systemctl restart nginx
+sudo systemctl restart mongod
+```
+
+---
+
+## Actualizar codigo (en cada instancia)
+
+```bash
+cd /home/ubuntu/backend   # o /home/ubuntu/frontend
+git pull origin develop
+source venv/bin/activate  # solo backend
+pip install -r requirements.txt  # solo backend
+npm install && npm run build  # solo frontend
+sudo systemctl restart backend  # solo backend
+sudo systemctl restart nginx    # solo frontend
+```
+
+---
+
+## Alternativa: Despliegue con Docker / Kubernetes
+
+Este repositorio tambien incluye:
+
+- `backend/Dockerfile` — imagen Docker del backend
+- `frontend/Dockerfile` — imagen Docker del frontend
+- `k8s/` — manifiestos para desplegar en Kubernetes
+
+Ver la seccion `k8s/README.md` o la documentacion de Kubernetes para mas detalles.
